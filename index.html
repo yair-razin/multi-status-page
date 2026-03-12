@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Service Status Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #e1e4e8;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+
+    .container {
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    header h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .last-updated {
+      font-size: 0.8rem;
+      color: #6b7280;
+    }
+
+    .overall-banner {
+      text-align: center;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .overall-banner.operational { background: #06362b; color: #34d399; }
+    .overall-banner.degraded { background: #3b2e08; color: #fbbf24; }
+    .overall-banner.outage { background: #3b0e0e; color: #f87171; }
+    .overall-banner.loading { background: #1e2330; color: #6b7280; }
+
+    .services { display: flex; flex-direction: column; gap: 0.5rem; }
+
+    .service-card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+
+    .service-card:hover { border-color: #30363d; }
+
+    .service-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.875rem 1rem;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .service-left {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .status-dot.operational { background: #34d399; }
+    .status-dot.degraded_performance,
+    .status-dot.partial_outage { background: #fbbf24; }
+    .status-dot.major_outage { background: #f87171; }
+    .status-dot.maintenance { background: #60a5fa; }
+    .status-dot.loading { background: #4b5563; }
+    .status-dot.error { background: #6b7280; }
+
+    .service-name {
+      font-weight: 500;
+      font-size: 0.95rem;
+    }
+
+    .service-right {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .status-label {
+      font-size: 0.8rem;
+      color: #9ca3af;
+    }
+
+    .chevron {
+      font-size: 0.7rem;
+      color: #4b5563;
+      transition: transform 0.15s;
+    }
+
+    .service-card.expanded .chevron { transform: rotate(90deg); }
+
+    .service-details {
+      display: none;
+      border-top: 1px solid #21262d;
+      padding: 0.75rem 1rem;
+    }
+
+    .service-card.expanded .service-details { display: block; }
+
+    .component-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.35rem 0;
+      font-size: 0.85rem;
+    }
+
+    .component-row .component-name { color: #9ca3af; }
+
+    .component-status {
+      font-size: 0.78rem;
+      font-weight: 500;
+    }
+
+    .component-status.operational { color: #34d399; }
+    .component-status.degraded_performance,
+    .component-status.partial_outage { color: #fbbf24; }
+    .component-status.major_outage { color: #f87171; }
+    .component-status.maintenance { color: #60a5fa; }
+
+    .view-full {
+      display: inline-block;
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: #58a6ff;
+      text-decoration: none;
+    }
+
+    .view-full:hover { text-decoration: underline; }
+
+    .error-msg {
+      font-size: 0.8rem;
+      color: #6b7280;
+      padding: 0.25rem 0;
+    }
+
+    .refresh-btn {
+      background: none;
+      border: 1px solid #30363d;
+      color: #9ca3af;
+      padding: 0.35rem 0.85rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      margin-top: 1.5rem;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .refresh-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .loading .status-dot { animation: pulse 1.5s infinite; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Service Status</h1>
+      <div class="last-updated" id="lastUpdated">Checking...</div>
+    </header>
+    <div class="overall-banner loading" id="overallBanner">Checking services...</div>
+    <div class="services" id="services"></div>
+    <button class="refresh-btn" id="refreshBtn" onclick="fetchAll()">Refresh</button>
+  </div>
+
+  <script>
+    // =====================================================================
+    // CONFIGURATION
+    // To add a service, add an entry with name and statusPageUrl.
+    // The service must use Atlassian Statuspage (most do).
+    // To remove a service, delete or comment out its entry.
+    // =====================================================================
+    const SERVICES = [
+      { name: 'Vercel',       statusPageUrl: 'https://www.vercel-status.com' },
+      { name: 'Claude',       statusPageUrl: 'https://status.claude.com' },
+      { name: 'Cursor',       statusPageUrl: 'https://status.cursor.com' },
+      { name: 'Dropbox Sign', statusPageUrl: 'https://status.hellosign.com' },
+      { name: 'SendGrid',     statusPageUrl: 'https://status.sendgrid.com' },
+      { name: 'Unit',         statusPageUrl: 'https://status.unit.co' },
+      { name: 'Plaid',        statusPageUrl: 'https://status.plaid.com' },
+      { name: 'Supabase',     statusPageUrl: 'https://status.supabase.com' },
+    ];
+
+    const statusLabels = {
+      operational: 'Operational',
+      degraded_performance: 'Degraded',
+      partial_outage: 'Partial Outage',
+      major_outage: 'Major Outage',
+      under_maintenance: 'Maintenance',
+    };
+
+    function getStatusClass(status) {
+      if (status === 'under_maintenance') return 'maintenance';
+      return status || 'loading';
+    }
+
+    function getOverallWorst(statuses) {
+      const priority = ['major_outage', 'partial_outage', 'degraded_performance', 'under_maintenance', 'operational'];
+      for (const p of priority) {
+        if (statuses.includes(p)) {
+          if (p === 'major_outage' || p === 'partial_outage') return 'outage';
+          if (p === 'degraded_performance' || p === 'under_maintenance') return 'degraded';
+        }
+      }
+      return 'operational';
+    }
+
+    function renderServices() {
+      const container = document.getElementById('services');
+      container.innerHTML = SERVICES.map((s, i) => `
+        <div class="service-card loading" id="svc-${i}">
+          <div class="service-header" onclick="toggle(${i})">
+            <div class="service-left">
+              <div class="status-dot loading"></div>
+              <span class="service-name">${s.name}</span>
+            </div>
+            <div class="service-right">
+              <span class="status-label">Checking...</span>
+              <span class="chevron">&#9654;</span>
+            </div>
+          </div>
+          <div class="service-details" id="details-${i}"></div>
+        </div>
+      `).join('');
+    }
+
+    function toggle(i) {
+      document.getElementById(`svc-${i}`).classList.toggle('expanded');
+    }
+
+    async function fetchStatus(service, index) {
+      const card = document.getElementById(`svc-${index}`);
+      const dot = card.querySelector('.status-dot');
+      const label = card.querySelector('.status-label');
+      const details = document.getElementById(`details-${index}`);
+
+      try {
+        const res = await fetch(`${service.statusPageUrl}/api/v2/summary.json`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        const status = data.status.indicator === 'none' ? 'operational' :
+                       data.status.indicator === 'minor' ? 'degraded_performance' :
+                       data.status.indicator === 'major' ? 'partial_outage' :
+                       data.status.indicator === 'critical' ? 'major_outage' : 'operational';
+
+        card.classList.remove('loading');
+        dot.className = `status-dot ${getStatusClass(status)}`;
+        label.textContent = statusLabels[status] || status;
+
+        const components = (data.components || []).filter(c => !c.group_id && c.name !== 'Visit our status site');
+        details.innerHTML = components.map(c => `
+          <div class="component-row">
+            <span class="component-name">${c.name}</span>
+            <span class="component-status ${getStatusClass(c.status)}">${statusLabels[c.status] || c.status}</span>
+          </div>
+        `).join('') +
+        `<a class="view-full" href="${service.statusPageUrl}" target="_blank" rel="noopener">View full status page &rarr;</a>`;
+
+        return status;
+      } catch (e) {
+        card.classList.remove('loading');
+        dot.className = 'status-dot error';
+        label.textContent = 'Unavailable';
+        details.innerHTML = `<div class="error-msg">Could not fetch status. <a class="view-full" href="${service.statusPageUrl}" target="_blank" rel="noopener">Check manually &rarr;</a></div>`;
+        return null;
+      }
+    }
+
+    async function fetchAll() {
+      const banner = document.getElementById('overallBanner');
+      banner.className = 'overall-banner loading';
+      banner.textContent = 'Checking services...';
+      renderServices();
+
+      const results = await Promise.all(SERVICES.map((s, i) => fetchStatus(s, i)));
+      const valid = results.filter(Boolean);
+
+      if (valid.length === 0) {
+        banner.className = 'overall-banner loading';
+        banner.textContent = 'Could not reach status pages';
+      } else {
+        const worst = getOverallWorst(valid);
+        banner.className = `overall-banner ${worst}`;
+        banner.textContent = worst === 'operational' ? 'All Systems Operational' :
+                             worst === 'degraded' ? 'Some Systems Degraded' :
+                             'System Outage Detected';
+      }
+
+      document.getElementById('lastUpdated').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+    }
+
+    fetchAll();
+  </script>
+</body>
+</html>
